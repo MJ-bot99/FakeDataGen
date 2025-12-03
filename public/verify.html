@@ -1,0 +1,102 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Action Handler</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f7f7; }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+
+    <div id="message-card" class="bg-white p-8 rounded-xl shadow-2xl max-w-sm w-full text-center">
+        <div id="status-icon" class="text-6xl mb-4">
+            <!-- Loading Icon -->
+            <svg class="animate-spin h-10 w-10 text-indigo-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+        <h2 id="status-title" class="text-xl font-bold text-gray-800 mb-2">Processing Request...</h2>
+        <p id="status-message" class="text-gray-600">Please wait while we verify your action.</p>
+        <button onclick="window.close()" id="close-button" class="mt-6 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 ease-in-out hidden">Close Window</button>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-analytics-compat.js"></script>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyDu1qYcw0UmfYI_81UowPscboktELhE3Zc",
+            // Corrected to use the default auth domain for internal processing
+            authDomain: "fakedatagen.firebaseapp.com",
+            projectId: "fakedatagen",
+            storageBucket: "fakedatagen.firebasestorage.app",
+            messagingSenderId: "100822609148",
+            appId: "1:100822609148:web:08f461178626eb7f2ebb79",
+            measurementId: "G-FT23G9GZ4P"
+        };
+
+        const app = firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth(app);
+        firebase.analytics(app);
+
+        const uiElements = {
+            icon: document.getElementById('status-icon'),
+            title: document.getElementById('status-title'),
+            message: document.getElementById('status-message'),
+            button: document.getElementById('close-button')
+        };
+
+        function updateUI(iconHtml, title, message, success = false) {
+            uiElements.icon.innerHTML = iconHtml;
+            uiElements.title.textContent = title;
+            uiElements.message.textContent = message;
+            uiElements.button.classList.toggle('hidden', !success);
+        }
+
+        function handleAction() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const mode = urlParams.get('mode');
+            const oobCode = urlParams.get('oobCode');
+
+            if (!mode || !oobCode) {
+                updateUI('❌', 'Invalid Action Link', 'The verification link is malformed or expired. Please request a new one.', false);
+                return;
+            }
+
+            uiElements.icon.classList.remove('animate-spin');
+
+            switch (mode) {
+                case 'verifyEmail':
+                    auth.applyActionCode(oobCode).then(() => {
+                        // --- MODIFIED SUCCESS MESSAGE AND BUTTON TEXT ---
+                        updateUI('✅', 'Email Verified!', 'Your email is verified! You can go back now and log in.', true);
+                        uiElements.button.textContent = "Go back and Login";
+                        // --- END MODIFICATION ---
+                    }).catch((error) => {
+                        let errorMessage = 'Verification failed. The link may have expired or been used already.';
+                        if (error.code === 'auth/invalid-action-code') {
+                            errorMessage = 'The verification code is invalid, expired, or has already been used.';
+                        } else if (error.code === 'auth/operation-not-allowed') {
+                            errorMessage = 'Email/Password sign-in is not enabled in Firebase Console.';
+                        }
+                        updateUI('❌', 'Verification Failed', errorMessage, false);
+                    });
+                    break;
+
+                default:
+                    updateUI('❌', 'Unsupported Action', `The action mode (${mode}) is not supported by this page.`, false);
+                    break;
+            }
+        }
+
+        handleAction();
+    </script>
+</body>
+</html>

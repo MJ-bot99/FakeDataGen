@@ -1,249 +1,18 @@
-import os
 import sys
-import requests
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QFrame, QSizePolicy, QMessageBox, QStackedWidget
+    QLabel, QLineEdit, QPushButton, QFrame, QSizePolicy, QStackedWidget, QMainWindow
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+# Import DatabaseManager (assuming it's in the same directory)
+from database_manager import DatabaseManager
 
-# Import Firebase Admin SDK
-try:
-    import firebase_admin
-    from firebase_admin import credentials, firestore, auth
-    from firebase_admin import exceptions as firebase_exceptions
-except ImportError:
-    print("Error: 'firebase-admin' is not installed. Please run 'pip install firebase-admin'")
-    sys.exit(1)
+# 💥 IMPORTING THE ACTUAL MAIN INTERFACE FROM main_interface.py
+from main_interface import MainInterface
 
 
 # ====================================================================
-# --- 1. Database Manager (Handles Firebase Auth and Firestore) ---
-# ====================================================================
-
-class DatabaseManager:
-    """
-    Handles all interactions with Firebase, utilizing the Admin SDK for
-    secure user management (Auth) and storing profile data (Firestore).
-    """
-
-    # ⚠️ CRITICAL: Replace this path with the actual path to your key file.
-    FIREBASE_KEY_PATH = 'fakedatagen-firebase-adminsdk-fbsvc-9d978c755a.json'
-
-    # ⚠️ You need to set these values from your Firebase Console
-    # Go to: Project Settings > General > Your Apps > Web App > Config
-    FIREBASE_API_KEY = "AIzaSyYOUR_API_KEY_HERE"
-    FIREBASE_PROJECT_ID = "your-project-id"
-
-    def __init__(self):
-        self._initialize_firebase()
-
-    def _initialize_firebase(self):
-        """Initializes the Firebase Admin SDK for both Auth and Firestore."""
-
-        # Check if the configuration file exists
-        if not os.path.exists(self.FIREBASE_KEY_PATH):
-            QMessageBox.critical(None, "Configuration Error",
-                                 f"Service account key not found at: {self.FIREBASE_KEY_PATH}\n"
-                                 "Please download your Firebase private key and place it in the project directory.")
-            sys.exit(1)
-
-        try:
-            cred = credentials.Certificate(self.FIREBASE_KEY_PATH)
-
-            # Check if the app is already initialized
-            if not firebase_admin._apps:
-                firebase_admin.initialize_app(cred)
-
-            self.db = firestore.client()
-            print("Firebase successfully initialized for Auth and Firestore.")
-
-        except Exception as e:
-            QMessageBox.critical(None, "Firebase Initialization Error",
-                                 f"Could not initialize Firebase: {e}")
-            sys.exit(1)
-
-    def _send_verification_email(self, email):
-        """
-        Sends email verification using Firebase Admin SDK.
-        Returns True if verification email was sent successfully.
-        """
-        try:
-            # Generate email verification link
-            action_code_settings = auth.ActionCodeSettings(
-                url=f'https://{self.FIREBASE_PROJECT_ID}.firebaseapp.com/__/auth/action',
-                handle_code_in_app=False
-            )
-
-            # Generate the verification link
-            verification_link = auth.generate_email_verification_link(
-                email,
-                action_code_settings=action_code_settings
-            )
-
-            # In a real application, you would send this link via email
-            # For now, we'll print it to console and simulate sending
-
-            print("=" * 60)
-            print(f"📧 VERIFICATION EMAIL FOR: {email}")
-            print("=" * 60)
-            print(f"Verification Link: {verification_link}")
-            print("=" * 60)
-            print("\n⚠️  In a production environment:")
-            print("1. This link would be sent via email using a service like SendGrid")
-            print("2. You would use: send_email(email, 'Verify Email', verification_link)")
-            print("3. Or trigger a Firebase Cloud Function to send the email")
-            print("=" * 60)
-
-            # For demo purposes, we'll return True to simulate email sent
-            # In production, you should actually send the email here
-            return True
-
-        except Exception as e:
-            print(f"Error generating verification link: {e}")
-            return False
-
-    def sign_up_user(self, full_name, email, password):
-        """
-        Creates a new user using Firebase Auth, sends verification email,
-        and stores profile data in Firestore.
-        """
-        try:
-            # 1. Use Firebase Auth to create the user.
-            user = auth.create_user(
-                email=email,
-                password=password,
-                display_name=full_name,
-                email_verified=False  # Email will be verified when user clicks link
-            )
-
-            print(f"✅ User created with UID: {user.uid}")
-
-            # 2. Send verification email
-            print("📤 Attempting to send verification email...")
-            email_sent = self._send_verification_email(email)
-
-            if not email_sent:
-                print("⚠️  Could not send verification email, but user was created")
-                # Continue anyway - user can request verification email later
-
-            # 3. Store profile info in Firestore using the UID.
-            user_ref = self.db.collection('users').document(user.uid)
-            user_ref.set({
-                'full_name': full_name,
-                'email': email,
-                'created_at': firestore.SERVER_TIMESTAMP,
-                'auth_uid': user.uid,
-                'email_verified': False,
-                'verification_sent': email_sent
-            })
-
-            print(f"✅ User profile saved to Firestore: {user.uid}")
-
-            # 4. Return success message
-            if email_sent:
-                return True, (
-                    "🎉 Account created successfully!\n\n"
-                    "📧 A verification email has been sent to:\n"
-                    f"   {email}\n\n"
-                    "Please check your inbox (and spam folder) for the verification link.\n"
-                    "You must verify your email before you can sign in."
-                )
-            else:
-                return True, (
-                    "🎉 Account created!\n\n"
-                    "⚠️  Verification email could not be sent.\n"
-                    "Please contact support or use 'Forgot Password' to verify your email."
-                )
-
-        except firebase_exceptions.InvalidArgumentError as e:
-            if 'password' in str(e).lower():
-                return False, "❌ Password must be at least 6 characters long."
-            return False, f"❌ Invalid input: {e}"
-
-        except firebase_exceptions.AlreadyExistsError:
-            return False, "❌ A user with this email already exists."
-
-        except Exception as e:
-            error_msg = str(e)
-            if "INVALID_EMAIL" in error_msg:
-                return False, "❌ Please enter a valid email address."
-            elif "WEAK_PASSWORD" in error_msg:
-                return False, "❌ Password is too weak. Use at least 6 characters."
-            else:
-                return False, f"❌ Could not create account: {e}"
-
-    def sign_in_user(self, email, password):
-        """
-        Checks for email verification status using Firebase Auth.
-
-        Note: Firebase Admin SDK cannot verify passwords directly.
-        In a real application, you should use Firebase Client SDK for password verification.
-        This is a simplified version that checks email verification status.
-        """
-        try:
-            # 1. Fetch user by email to check verification status.
-            user = auth.get_user_by_email(email)
-
-            print(f"🔍 Found user: {user.uid}, Email verified: {user.email_verified}")
-
-            # 2. Enforce email verification.
-            if not user.email_verified:
-                # Offer to resend verification email
-                email_sent = self._send_verification_email(email)
-
-                if email_sent:
-                    return False, (
-                        "❌ Email not verified!\n\n"
-                        "📧 A new verification email has been sent to:\n"
-                        f"   {email}\n\n"
-                        "Please verify your email before signing in."
-                    )
-                else:
-                    return False, (
-                        "❌ Email not verified!\n\n"
-                        "Please check your inbox for the verification link.\n"
-                        "You can also click 'Sign Up' again to resend the verification email."
-                    )
-
-            # 3. In a real app, you would verify password here using Firebase Client SDK
-            # For this demo, we'll assume password is correct if email is verified
-            print(f"✅ User {email} is verified and can sign in")
-            return True, "✅ Sign in successful! Welcome back!"
-
-        except firebase_exceptions.NotFoundError:
-            return False, "❌ Invalid email or password."
-
-        except Exception as e:
-            return False, f"❌ Error: {e}"
-
-    def resend_verification_email(self, email):
-        """
-        Resends verification email to a user.
-        """
-        try:
-            # Check if user exists
-            user = auth.get_user_by_email(email)
-
-            if user.email_verified:
-                return True, "✅ Email is already verified!"
-
-            # Send verification email
-            email_sent = self._send_verification_email(email)
-
-            if email_sent:
-                return True, f"📧 Verification email resent to {email}"
-            else:
-                return False, "❌ Failed to resend verification email"
-
-        except firebase_exceptions.NotFoundError:
-            return False, "❌ User not found"
-        except Exception as e:
-            return False, f"❌ Error: {e}"
-
-
-# ====================================================================
-# --- 2. Base Auth Form (UI Styles and Container) ---
+# --- Base Auth Form (UI Styles and Container) ---
 # ====================================================================
 class AuthForm(QWidget):
     switch_form = pyqtSignal(str)
@@ -269,7 +38,7 @@ class AuthForm(QWidget):
         title_label.setAlignment(Qt.AlignCenter)
         header_layout.addWidget(title_label)
 
-        subtitle_label = QLabel("Generate realistic fake data for testing")
+        subtitle_label = QLabel("Secure Authentication Interface")
         subtitle_label.setObjectName("subtitleLabel")
         subtitle_label.setAlignment(Qt.AlignCenter)
         header_layout.addWidget(subtitle_label)
@@ -314,13 +83,11 @@ class AuthForm(QWidget):
         self.btn_signup.style().polish(self.btn_signup)
 
     def get_styles(self):
-        # --- Color Definitions ---
         FOCUS_PURPLE = "#a07ade"
         PURPLE_HOVER = "#8d70b5"
         ERROR_RED = "#dc2626"
         SUCCESS_GREEN = "#10b981"
         INFO_BLUE = "#3b82f6"
-        WARNING_YELLOW = "#f59e0b"
 
         CARD_MIN_WIDTH = 450
         NEW_BG_COLOR = "#f7f7f7"
@@ -357,12 +124,12 @@ class AuthForm(QWidget):
             background-color: {CARD_BG_COLOR};
             border-radius: 16px;
             min-width: {CARD_MIN_WIDTH}px;
-            border: 1px solid #d9d9d9; 
-            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.08); 
+            border: 1px solid #d9d9d9;
+            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.08);
         }}
 
         QStackedWidget {{
-            background-color: transparent; 
+            background-color: transparent;
         }}
 
         /* --- Tab Frame and Buttons --- */
@@ -372,9 +139,8 @@ class AuthForm(QWidget):
             padding: 0.5px;
         }}
 
-        /* General tab button styles */
         QPushButton#tabButton {{
-            padding: 6px 20px;      
+            padding: 6px 20px;
             border: none;
             font-weight: 500;
             font-size: 13px;
@@ -382,22 +148,21 @@ class AuthForm(QWidget):
             background-color: transparent;
             border-radius: 6px;
             min-height: 20px;
-            margin: 0.5px;            
+            margin: 0.5px;
         }}
 
-        /* Active Tab Button */
         QPushButton#tabButton[active="true"] {{
             color: #000000;
             background-color: #ffffff;
-            font-weight: 600; 
+            font-weight: 600;
             box-shadow: 0px 1px 3px rgba(0, 0, 0, 0.05);
-            border-radius: 6px;     
+            border-radius: 6px;
         }}
 
         /* --- Input Fields and Labels --- */
         QLabel {{
-            color: #222222; 
-            font-weight: 500; 
+            color: #222222;
+            font-weight: 500;
             margin-top: 15px;
             margin-bottom: 5px;
             font-size: 13px;
@@ -414,29 +179,27 @@ class AuthForm(QWidget):
         }}
 
         QLineEdit::placeholder {{
-            color: #999999; 
+            color: #999999;
             font-weight: 400;
         }}
 
-        /* Error state for input fields */
         QLineEdit[error="true"] {{
             border: 1px solid {ERROR_RED};
             background-color: rgba(220, 38, 38, 0.05);
         }}
 
-        /* Focus state with subtle outline */
         QLineEdit:focus {{
-            border: 1px solid {FOCUS_PURPLE}; 
+            border: 1px solid {FOCUS_PURPLE};
             outline: 2px solid rgba(160, 122, 222, 0.2);
         }}
 
         /* --- Main Action Button --- */
         QPushButton#mainButton {{
-            background-color: {BUTTON_LILAC}; 
-            color: white; 
-            padding: 14px 20px; 
+            background-color: {BUTTON_LILAC};
+            color: white;
+            padding: 14px 20px;
             border-radius: 10px;
-            font-weight: 600; 
+            font-weight: 600;
             margin-top: 25px;
             font-size: 14px;
         }}
@@ -494,30 +257,26 @@ class AuthForm(QWidget):
             margin-bottom: 5px;
             border: 1px solid rgba(59, 130, 246, 0.2);
         }}
-
-        QLabel#warningMessage {{
-            color: {WARNING_YELLOW};
-            font-size: 13px;
-            font-weight: 500;
-            padding: 8px 12px;
-            background-color: rgba(245, 158, 11, 0.08);
-            border-radius: 8px;
-            margin-top: 5px;
-            margin-bottom: 5px;
-            border: 1px solid rgba(245, 158, 11, 0.2);
-        }}
         """
 
 
 # ====================================================================
-# --- 3. Sign In Form ---
+# --- Sign In Form (Signal Added) ---
 # ====================================================================
 class SignInForm(QWidget):
-    def __init__(self, db_manager):
+    # New signal emitted upon successful sign-in
+    login_success = pyqtSignal()
+
+    def __init__(self, db_manager: DatabaseManager):
         super().__init__()
         self.db_manager = db_manager
         self.setObjectName("signInForm")
         layout = QVBoxLayout(self)
+
+        # Initialize timer
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.hide_messages)
 
         layout.setSpacing(5)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -558,52 +317,59 @@ class SignInForm(QWidget):
         self.info_message = QLabel("")
         self.info_message.setObjectName("infoMessage")
         self.info_message.setVisible(False)
-        self.info_message.setWordWrap(True)
         layout.addWidget(self.info_message)
 
         # Sign In button
         btn = QPushButton("Sign In")
         btn.setObjectName("mainButton")
+        # Connect button to handler
         btn.clicked.connect(self.handle_sign_in)
         layout.addWidget(btn)
 
         layout.addStretch()
 
-    def clear_messages(self):
-        """Clear all messages"""
-        self.error_message.setText("")
+    def hide_messages(self):
+        """Hides all temporary message labels."""
         self.error_message.setVisible(False)
-        self.success_message.setText("")
         self.success_message.setVisible(False)
-        self.info_message.setText("")
         self.info_message.setVisible(False)
+
+    def clear_messages(self):
+        """Clear all messages and error states."""
+        self.timer.stop()
+        self.error_message.setText("")
+        self.success_message.setText("")
+        self.hide_messages()
         self.resend_btn.setVisible(False)
 
-        # Clear error states from input fields
         self.email_input.setProperty("error", False)
         self.email_input.style().polish(self.email_input)
         self.password_input.setProperty("error", False)
         self.password_input.style().polish(self.password_input)
 
-    def show_message(self, message_type, message, focus_field=None):
-        """Show a message inline"""
+    def show_message(self, message_type, message, focus_field=None, autohide=True):
+        """Show a message inline, optionally starting a 5-second autohide timer."""
         self.clear_messages()
 
-        if message_type == "error":
-            self.error_message.setText(message)
-            self.error_message.setVisible(True)
-        elif message_type == "success":
-            self.success_message.setText(message)
-            self.success_message.setVisible(True)
-        elif message_type == "info":
-            self.info_message.setText(message)
-            self.info_message.setVisible(True)
+        target_label = None
 
-        # Show resend button if email not verified error
+        if message_type == "error":
+            target_label = self.error_message
+        elif message_type == "success":
+            target_label = self.success_message
+        elif message_type == "info":
+            target_label = self.info_message
+
+        if target_label:
+            target_label.setText(message)
+            target_label.setVisible(True)
+
+            if autohide:
+                self.timer.start(5000)  # 5000 milliseconds = 5 seconds
+
         if "not verified" in message.lower():
             self.resend_btn.setVisible(True)
 
-        # Highlight problematic fields
         if focus_field == "email":
             self.email_input.setProperty("error", True)
             self.email_input.style().polish(self.email_input)
@@ -618,11 +384,14 @@ class SignInForm(QWidget):
         email = self.email_input.text().strip()
 
         if not email:
-            self.show_message("error", "Please enter your email.", "email")
+            self.show_message("error", "Please enter your email to resend verification.", "email")
             return
 
         self.resend_btn.setText("Sending...")
         self.resend_btn.setEnabled(False)
+
+        # Display a persistent message while sending (autohide=False)
+        self.show_message("info", "Resending verification email...", autohide=False)
 
         success, message = self.db_manager.resend_verification_email(email)
 
@@ -638,46 +407,48 @@ class SignInForm(QWidget):
         email = self.email_input.text().strip()
         password = self.password_input.text().strip()
 
-        # Clear previous messages
         self.clear_messages()
 
-        # Validation
-        if not email and not password:
-            self.show_message("error", "Please enter both email and password.", "email")
-            return
-        if not email:
-            self.show_message("error", "Please enter your email.", "email")
-            return
-        if not password:
-            self.show_message("error", "Please enter your password.", "password")
+        if not email or not password:
+            self.show_message("error", "Please enter both email and password.",
+                              "email" if not email else "password")
             return
 
-        # Check for valid email format
         if "@" not in email or "." not in email:
             self.show_message("error", "Please enter a valid email address.", "email")
             return
 
-        # Attempt sign in
+        # Attempt sign in (Uses the secure REST API check in DatabaseManager)
         success, message = self.db_manager.sign_in_user(email, password)
+
+        # Always clear password after an attempt for security
+        self.password_input.clear()
 
         if success:
             self.show_message("success", message)
-            # Clear password field
-            self.password_input.clear()
-            # TODO: Transition to main application window here
+            self.email_input.clear()  # Clear email on success
+
+            # 💥 EMIT SIGNAL TO SWITCH TO MAIN INTERFACE
+            self.login_success.emit()
+
         else:
             self.show_message("error", message, "email")
 
 
 # ====================================================================
-# --- 4. Sign Up Form ---
+# --- Sign Up Form ---
 # ====================================================================
 class SignUpForm(QWidget):
-    def __init__(self, db_manager):
+    def __init__(self, db_manager: DatabaseManager):
         super().__init__()
         self.db_manager = db_manager
         self.setObjectName("signUpForm")
         layout = QVBoxLayout(self)
+
+        # Initialize timer
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.hide_messages)
 
         layout.setSpacing(5)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -701,25 +472,22 @@ class SignUpForm(QWidget):
         self.password_input.setEchoMode(QLineEdit.Password)
         layout.addWidget(self.password_input)
 
-        # Email verification info
-        self.info_message = QLabel("")
-        self.info_message.setObjectName("infoMessage")
-        self.info_message.setVisible(False)
-        self.info_message.setWordWrap(True)
-        layout.addWidget(self.info_message)
-
-        # Messages
+        # Messages (Error, Success)
         self.error_message = QLabel("")
         self.error_message.setObjectName("errorMessage")
         self.error_message.setVisible(False)
-        self.error_message.setWordWrap(True)
         layout.addWidget(self.error_message)
 
         self.success_message = QLabel("")
         self.success_message.setObjectName("successMessage")
         self.success_message.setVisible(False)
-        self.success_message.setWordWrap(True)
         layout.addWidget(self.success_message)
+
+        # Info message (This is now used for temporary messages only)
+        self.info_message = QLabel("")
+        self.info_message.setObjectName("infoMessage")
+        self.info_message.setVisible(False)
+        layout.addWidget(self.info_message)
 
         # Create Account button
         btn = QPushButton("Create Account")
@@ -729,14 +497,19 @@ class SignUpForm(QWidget):
 
         layout.addStretch()
 
-    def clear_messages(self):
-        """Clear all messages"""
-        self.error_message.setText("")
+    def hide_messages(self):
+        """Hides all temporary message labels."""
         self.error_message.setVisible(False)
-        self.success_message.setText("")
         self.success_message.setVisible(False)
-        self.info_message.setText("")
         self.info_message.setVisible(False)
+
+    def clear_messages(self):
+        """Clear all messages and error states."""
+        self.timer.stop()
+        self.error_message.setText("")
+        self.success_message.setText("")
+        self.info_message.setText("")
+        self.hide_messages()
 
         # Clear error states from input fields
         self.name_input.setProperty("error", False)
@@ -746,19 +519,25 @@ class SignUpForm(QWidget):
         self.password_input.setProperty("error", False)
         self.password_input.style().polish(self.password_input)
 
-    def show_message(self, message_type, message, focus_field=None):
-        """Show a message inline"""
+    def show_message(self, message_type, message, focus_field=None, autohide=True):
+        """Show a message inline, starting a 5-second autohide timer."""
         self.clear_messages()
 
+        target_label = None
+
         if message_type == "error":
-            self.error_message.setText(message)
-            self.error_message.setVisible(True)
+            target_label = self.error_message
         elif message_type == "success":
-            self.success_message.setText(message)
-            self.success_message.setVisible(True)
+            target_label = self.success_message
         elif message_type == "info":
-            self.info_message.setText(message)
-            self.info_message.setVisible(True)
+            target_label = self.info_message
+
+        if target_label:
+            target_label.setText(message)
+            target_label.setVisible(True)
+
+            if autohide:
+                self.timer.start(5000)  # 5000 milliseconds = 5 seconds
 
         # Highlight problematic fields
         if focus_field == "name":
@@ -779,11 +558,7 @@ class SignUpForm(QWidget):
         email = self.email_input.text().strip()
         password = self.password_input.text().strip()
 
-        # Clear previous messages
         self.clear_messages()
-
-        # Show info message about email verification
-        self.show_message("info", "After creating your account, you'll receive a verification email.")
 
         # Validation
         if not full_name or not email or not password:
@@ -791,27 +566,28 @@ class SignUpForm(QWidget):
                               "name" if not full_name else "email" if not email else "password")
             return
 
-        # Check for valid email format
         if "@" not in email or "." not in email:
             self.show_message("error", "Please enter a valid email address.", "email")
             return
 
-        # Check password length
         if len(password) < 6:
             self.show_message("error", "Password must be at least 6 characters long.", "password")
             return
 
+        # Show info message while processing (autohide=False)
+        self.show_message("info", "Creating account and sending verification email...", autohide=False)
+
         # Attempt sign up
         success, message = self.db_manager.sign_up_user(full_name, email, password)
 
+        # Now show the result, which will auto-hide
         if success:
             self.show_message("success", message)
-            # Clear all fields
+            # Clear input fields on success
             self.name_input.clear()
             self.email_input.clear()
             self.password_input.clear()
         else:
-            # Determine which field to focus based on error message
             focus_field = "email"
             if "name" in message.lower():
                 focus_field = "name"
@@ -822,37 +598,36 @@ class SignUpForm(QWidget):
 
 
 # ====================================================================
-# --- 5. Main Application Window ---
+# --- Auth Window (Manages Stacks) ---
 # ====================================================================
-class MainWindow(AuthForm):
+class AuthWindow(AuthForm):
     """
-    The main window structure that manages the stacked sign-in/sign-up forms.
+    The authentication widget structure that manages the stacked sign-in/sign-up forms.
     """
-    STATIC_OVERHEAD = 220  # Increased to accommodate messages
+    STATIC_OVERHEAD = 220
+
+    # Propagate the login signal from SignInForm
+    login_success = pyqtSignal()
 
     def __init__(self, db_manager, initial_form="signup"):
         super().__init__(db_manager)
-        self.setWindowTitle("DataForge Authentication")
 
-        self.resize(1440, 1024)
-
-        # 1. Setup the stacked widget
         self.stacked = QStackedWidget()
 
-        # 2. Instantiate forms
         self.signup_widget = SignUpForm(self.db_manager)
         self.signin_widget = SignInForm(self.db_manager)
+
+        # Connect the SignInForm signal to AuthWindow's signal
+        self.signin_widget.login_success.connect(self.login_success.emit)
+
         self.stacked.addWidget(self.signup_widget)
         self.stacked.addWidget(self.signin_widget)
 
-        # 3. Add the stacked widget to the card layout
         self.card_layout.addWidget(self.stacked)
 
-        # 4. Connect signals and set initial view
         self.switch_form.connect(self.change_form)
         self.change_form(initial_form)
 
-        # 5. Timer to dynamically update card height
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_card_height)
         self.timer.start(50)
@@ -860,16 +635,16 @@ class MainWindow(AuthForm):
     def update_card_height(self):
         """Dynamically adjusts the card height based on the current form's content."""
         current_widget = self.stacked.currentWidget()
-        content_height = current_widget.minimumSizeHint().height()
+        content_height = current_widget.sizeHint().height()
 
         new_card_height = content_height + self.STATIC_OVERHEAD
 
         if abs(self.card.height() - new_card_height) > 5:
             self.card.setFixedHeight(new_card_height)
+            self.card.parentWidget().updateGeometry()
 
     def change_form(self, form_name):
         """Switches the view and updates the card size."""
-        # Clear any existing messages when switching forms
         self.signup_widget.clear_messages()
         self.signin_widget.clear_messages()
 
@@ -879,39 +654,45 @@ class MainWindow(AuthForm):
             self.stacked.setCurrentWidget(self.signup_widget)
 
         self.set_active_tab(form_name)
-        # Force an update immediately after switching
         self.update_card_height()
 
 
 # ====================================================================
-# --- 6. Application Entry Point ---
+# --- Main Application Container (Handles Switching) ---
 # ====================================================================
-def main():
-    app = QApplication(sys.argv)
+class AuthAppContainer(QMainWindow):
 
-    # Initialize database manager
-    print("Initializing Firebase Database Manager...")
-    db_manager = DatabaseManager()
+    def __init__(self, db_manager, initial_form="signup"):
+        super().__init__()
+        self.setWindowTitle("DataForge Authentication Interface")
+        self.setGeometry(100, 100, 1440, 1024)
 
-    # Check if Firebase is properly configured
-    if db_manager.FIREBASE_API_KEY == "AIzaSyYOUR_API_KEY_HERE":
-        print("\n⚠️  WARNING: You need to configure Firebase API Key!")
-        print("Please update these values in DatabaseManager class:")
-        print(f"1. FIREBASE_API_KEY = 'YOUR_FIREBASE_WEB_API_KEY'")
-        print(f"2. FIREBASE_PROJECT_ID = 'your-project-id'")
-        print("\nGet these from Firebase Console:")
-        print("Project Settings > General > Your Apps > Web App > Config")
+        # 1. Create the main stacked widget for the entire application
+        self.app_stack = QStackedWidget()
+        self.setCentralWidget(self.app_stack)
 
-        # Show warning but continue for demo
-        QMessageBox.warning(None, "Configuration Required",
-                            "Please update Firebase API Key and Project ID in the code.\n"
-                            "Check the console for instructions.")
+        # 2. Instantiate the Auth UI (which manages sign-in/sign-up forms)
+        self.auth_component = AuthWindow(db_manager, initial_form)
 
-    window = MainWindow(db_manager)
-    window.show()
+        # 3. Instantiate the Main Interface
+        self.main_component = MainInterface()
 
-    sys.exit(app.exec_())
+        # 4. Add components to the main stack
+        self.app_stack.addWidget(self.auth_component)  # Index 0: Auth
+        self.app_stack.addWidget(self.main_component)  # Index 1: Main App
+
+        # 5. Connect the signal from the AuthWindow to the switch method
+        self.auth_component.login_success.connect(self.show_main_interface)
+
+        # Start on the Auth screen
+        self.app_stack.setCurrentIndex(0)
+
+    def show_main_interface(self):
+        """Switches the QStackedWidget view to the main application interface."""
+        # Switch to the MainInterface (Index 1)
+        self.app_stack.setCurrentIndex(1)
+        self.setWindowTitle("DataForge - Main Application")
 
 
-if __name__ == '__main__':
-    main()
+# Renamed to AuthAppContainer to resolve the import conflict
+MainWindow = AuthAppContainer

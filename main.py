@@ -5,8 +5,8 @@ from PyQt5.QtCore import Qt
 # Import the Database Manager (to instantiate the connection)
 from database_manager import DatabaseManager
 
-# Import the Main Window class (which we assume is defined in sign_in_up.py)
-from sign_in_up import MainWindow
+# Import the Main Window class (which now hosts the Auth UI)
+from sign_in_up import AuthAppContainer
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
@@ -19,8 +19,8 @@ if __name__ == "__main__":
     db_manager_instance = DatabaseManager()
 
     # 2. Instantiate the main window, passing the manager
-    # This assumes MainWindow is structured to accept db_manager in its constructor.
-    window = MainWindow(db_manager=db_manager_instance, initial_form="signup")
+    # We pass the manager to the MainWindow (AuthContainer)
+    window = AuthAppContainer(db_manager=db_manager_instance, initial_form="signup")
 
     # Show the window and start the application loop
     window.show()
