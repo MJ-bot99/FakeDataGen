@@ -1,6 +1,5 @@
 import os
 import sys
-import requests
 import smtplib
 import time
 from email.mime.text import MIMEText
@@ -13,56 +12,32 @@ try:
     from firebase_admin import credentials, firestore, auth
     from firebase_admin import exceptions as firebase_exceptions
 except ImportError:
-    # This check ensures the Admin SDK is present, which is mandatory for this class
     print("Error: 'firebase-admin' is not installed. Please run 'pip install firebase-admin'")
     sys.exit(1)
 
 
 class DatabaseManager:
     """
-    Handles all interactions with Firebase, combining secure user authentication
-    via REST API, profile storage via Firestore, and REAL email sending via SMTP.
+    Handles all interactions with Firebase with REAL email sending.
     """
 
-    # ⚠️ CRITICAL: Replace with your Firebase service account key
-    #FIREBASE_KEY_PATH = 'fakedatagen-firebase-adminsdk-fbsvc-d90cad701d.json'
-
-    # ⚠️ FIREBASE CLIENT CONFIG (Needed for REST API calls)
-    FIREBASE_API_KEY = "AIzaSyDu1qYcw0UmfYI_81UowPscboktELhE3Zc"
-    FIREBASE_PROJECT_ID = "fakedatagen"
-
-    # 💥 NEW: Use the specific channel domain for verification links
-    VERIFICATION_DOMAIN = "fakedatagen-e31b9.web.app"
-
-    # REST API endpoint for password sign-in
-    _SIGN_IN_URL = (
-        "https://www.googleapis.com/identitytoolkit/v3/relyingparty/verifyPassword"
-    )
+    # ⚠️ Replace with your Firebase service account key
+    FIREBASE_KEY_PATH = 'fakedatagen-firebase-adminsdk-fbsvc-9d978c755a.json'
 
     # ⚠️ EMAIL CONFIGURATION - YOU MUST SET THESE
     EMAIL_CONFIG = {
-        'smtp_server': 'smtp.gmail.com',
-        'smtp_port': 587,
-        'sender_email': 'danysrael720@gmail.com',
-        # NOTE: This must be a Google App Password, often separated by spaces.
-        'sender_password': 'vmsg carj xpqd mtsc',
-        'use_tls': True,
+        'smtp_server': 'smtp.gmail.com',  # For Gmail
+        'smtp_port': 587,  # 587 for TLS, 465 for SSL
+        'sender_email': 'danysrael720@gmail.com',  # Your Gmail address
+        'sender_password': 'nsag ecay gpse cdsy',  # App password from Google
+        'use_tls': True,  # Use TLS encryption
         'sender_name': 'DataForge'
     }
-
-    # Simple rate limiting: Store the last time an email was sent to an address
-    LAST_EMAIL_SENT = {}
-    RESEND_DELAY_SECONDS = 60
 
     def __init__(self):
         """Initialize Firebase and test email configuration."""
         self._initialize_firebase()
         self.email_enabled = self._check_email_config()
-
-        # Check for REST API Key configuration
-        if self.FIREBASE_API_KEY == "AIzaSyYOUR_API_KEY_HERE":
-            QMessageBox.warning(None, "Configuration Required",
-                                "Please update Firebase API Key and Project ID in 'database_manager.py'.")
 
     def _initialize_firebase(self):
         """Initialize Firebase Admin SDK."""
@@ -92,41 +67,14 @@ class DatabaseManager:
             print("\n" + "=" * 60)
             print("⚠️  EMAIL NOT CONFIGURED - Verification emails won't be sent!")
             print("=" * 60)
+            print("To enable email sending, update EMAIL_CONFIG with:")
+            print("1. Your Gmail address")
+            print("2. An App Password (not your regular password)")
+            print("\nGet App Password from:")
+            print("https://myaccount.google.com/apppasswords")
+            print("=" * 60 + "\n")
             return False
         return True
-
-    def _verify_password_with_rest_api(self, email, password):
-        """
-        Securely verifies a user's password using the Firebase Auth REST API.
-        Returns (True, id_token) on success, (False, error_message) on failure.
-        """
-        payload = {
-            "email": email,
-            "password": password,
-            "returnSecureToken": True
-        }
-
-        url = f"{self._SIGN_IN_URL}?key={self.FIREBASE_API_KEY}"
-
-        try:
-            response = requests.post(url, json=payload)
-            response_data = response.json()
-
-            if response.status_code == 200:
-                # Password is correct. Store the ID token (not used here but essential for API calls)
-                id_token = response_data.get('idToken')
-                return True, id_token
-            else:
-                # Handle REST API errors
-                error_code = response_data.get('error', {}).get('message', 'UNKNOWN_ERROR')
-                if error_code == "EMAIL_NOT_FOUND" or error_code == "INVALID_PASSWORD":
-                    return False, "❌ Invalid email or password."
-                else:
-                    print(f"REST API Error: {error_code}")
-                    return False, f"❌ Sign-in failed: {error_code}"
-
-        except requests.exceptions.RequestException:
-            return False, "❌ A network error occurred. Check your connection."
 
     def _send_verification_email(self, email, verification_link):
         """
@@ -138,21 +86,14 @@ class DatabaseManager:
             print("⚠️  Email not sent - Update EMAIL_CONFIG to send real emails")
             return False
 
-        # --- Rate Limit Check ---
-        current_time = time.time()
-        last_sent = self.LAST_EMAIL_SENT.get(email, 0)
-        if current_time - last_sent < self.RESEND_DELAY_SECONDS:
-            print(f"📧 Rate limit hit for {email}. Skipping email send.")
-            return True  # Pretend it was successful to avoid error messages in UI
-        # --- End Rate Limit Check ---
-
         try:
+            # Create email message
             msg = MIMEMultipart('alternative')
             msg['Subject'] = 'Verify Your Email - DataForge'
             msg['From'] = f"{self.EMAIL_CONFIG['sender_name']} <{self.EMAIL_CONFIG['sender_email']}>"
             msg['To'] = email
 
-            # Create HTML email content (unchanged)
+            # Create HTML email content
             html = f"""
             <!DOCTYPE html>
             <html>
@@ -167,40 +108,55 @@ class DatabaseManager:
 
                 <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
                     <p>Hello,</p>
+
                     <p>Thank you for creating an account with <strong>DataForge</strong>!</p>
+
                     <p>Please verify your email address by clicking the button below:</p>
+
                     <div style="text-align: center; margin: 30px 0;">
-                        <a href="{verification_link}"
-                           style="background: #A68CC8; color: white; padding: 12px 30px;
+                        <a href="{verification_link}" 
+                           style="background: #A68CC8; color: white; padding: 12px 30px; 
                                   text-decoration: none; border-radius: 5px; font-weight: bold;
                                   display: inline-block;">
                             Verify Email Address
                         </a>
                     </div>
+
                     <p>Or copy and paste this link into your browser:</p>
                     <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0; word-break: break-all;">
                         <code style="font-size: 12px;">{verification_link}</code>
                     </div>
+
                     <p>This verification link will expire in 24 hours.</p>
+
                     <p>If you didn't create this account, please ignore this email.</p>
+
                     <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+
                     <p style="color: #666; font-size: 12px;">
-                        If you're having trouble clicking the button, copy and paste the URL above
+                        If you're having trouble clicking the button, copy and paste the URL above 
                         into your web browser.
                     </p>
                 </div>
+
                 <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
                     <p>© {time.strftime('%Y')} DataForge. All rights reserved.</p>
                 </div>
             </body>
             </html>
             """
+
+            # Plain text version (for email clients that don't support HTML)
             text = f"""
             Verify Your Email - DataForge
+
             Please verify your email address by clicking this link:
             {verification_link}
+
             If you can't click the link, copy and paste it into your browser.
+
             This link will expire in 24 hours.
+
             If you didn't create this account, please ignore this email.
             """
 
@@ -210,20 +166,15 @@ class DatabaseManager:
             # Connect to SMTP server and send email
             print(f"📤 Connecting to SMTP server: {self.EMAIL_CONFIG['smtp_server']}")
 
-            # IMPORTANT: Remove spaces from App Password before logging in
-            clean_password = self.EMAIL_CONFIG['sender_password'].replace(" ", "")
-
             if self.EMAIL_CONFIG['use_tls']:
                 server = smtplib.SMTP(self.EMAIL_CONFIG['smtp_server'], self.EMAIL_CONFIG['smtp_port'])
                 server.starttls()  # Enable TLS encryption
             else:
                 server = smtplib.SMTP_SSL(self.EMAIL_CONFIG['smtp_server'], self.EMAIL_CONFIG['smtp_port'])
 
-            server.login(self.EMAIL_CONFIG['sender_email'], clean_password)
+            server.login(self.EMAIL_CONFIG['sender_email'], self.EMAIL_CONFIG['sender_password'])
             server.send_message(msg)
             server.quit()
-
-            self.LAST_EMAIL_SENT[email] = current_time  # Update timestamp on success
 
             print(f"✅ Verification email sent to: {email}")
             return True
@@ -233,20 +184,29 @@ class DatabaseManager:
             print("   Make sure you're using an App Password, not your regular password.")
             return False
         except Exception as e:
-            # This will catch other errors like connection failures
             print(f"❌ Failed to send email: {e}")
             return False
 
     def _generate_verification_link(self, email):
-        """Generate a verification link using Firebase Admin SDK, using the custom channel domain."""
+        """Generate a verification link using Firebase Admin SDK."""
         try:
-            # Use the specific channel domain provided by the user
-            verification_page_url = 'https://fakedatagen.web.app/verify.html'
+            # Get project ID
+            project_id = self.app.project_id if hasattr(self, 'app') else 'fakedatagen'
 
+            # ✅ YOUR FIREBASE HOSTING URL
+            verification_page_url = f'https://{project_id}.web.app/verify.html'
+            # OR: f'https://{project_id}.firebaseapp.com/verify.html'
+
+            print(f"🔗 Using Firebase Hosting URL: {verification_page_url}")
+
+            # Create action code settings
             action_code_settings = auth.ActionCodeSettings(
-                url=verification_page_url,
+                url=verification_page_url,  # ✅ Points to YOUR Firebase Hosting page
                 handle_code_in_app=False
             )
+
+            print(f"🔗 Generating verification link for: {email}")
+            print(f"🔗 Redirect URL: {action_code_settings.url}")
 
             # Generate the verification link
             verification_link = auth.generate_email_verification_link(
@@ -255,14 +215,36 @@ class DatabaseManager:
             )
 
             print(f"✅ Verification link generated successfully")
-            print(f"🔗 Verification link generated for: {email}")
+
+            # Also log the link for testing
+            print(f"🔗 Full verification link: {verification_link[:100]}...")
 
             return verification_link
 
         except firebase_exceptions.FirebaseError as e:
             print(f"❌ Firebase error: {e}")
+
             if "UNAUTHORIZED_DOMAIN" in str(e):
                 print("\n🔧 IMPORTANT: You need to authorize your domain in Firebase Console!")
+                print("1. Go to: https://console.firebase.google.com/")
+                print("2. Select your project: fakedatagen")
+                print("3. Go to: Authentication → Sign-in method")
+                print("4. Scroll to 'Authorized domains'")
+                print("5. Click 'Add domain' and add:")
+                print(f"   - {project_id}.web.app")
+                print(f"   - {project_id}.firebaseapp.com")
+                print("6. Save and wait 5 minutes")
+                print("\n⚠️  Until then, emails will show links in console only.")
+
+            # Fallback: Show link in console for testing
+            print(f"\n📧 DEV MODE: Manual verification for {email}")
+            print("Use Firebase Console to verify email:")
+            print("1. Go to: https://console.firebase.google.com/")
+            print("2. Select your project")
+            print("3. Go to: Authentication → Users")
+            print(f"4. Find: {email}")
+            print("5. Click ••• → 'Enable user'")
+
             return None
 
         except Exception as e:
@@ -286,11 +268,16 @@ class DatabaseManager:
 
             # 2. Generate verification link
             verification_link = self._generate_verification_link(email)
-            email_sent = False
 
-            if verification_link:
+            if not verification_link:
+                # Store user anyway even if link generation fails
+                print("⚠️  Could not generate verification link, but user was created")
+            else:
                 # 3. Send actual verification email
                 email_sent = self._send_verification_email(email, verification_link)
+
+                if not email_sent and self.email_enabled:
+                    print("⚠️  Email sending failed, but user was created")
 
             # 4. Store user data in Firestore
             user_ref = self.db.collection('users').document(user.uid)
@@ -302,19 +289,33 @@ class DatabaseManager:
                 'email_verified': False
             })
 
-            # 5. Return success message
-            if email_sent:
-                return True, (
-                    "🎉 Account created successfully!\n\n"
-                    "📧 A verification email has been sent to:\n"
-                    f"   {email}\n\n"
-                    "📋 Please check your inbox and spam folder.\n"
-                    "You must verify your email before signing in."
-                )
+            # 5. Return appropriate message based on email status
+            if self.email_enabled:
+                if verification_link:
+                    return True, (
+                        "🎉 Account created successfully!\n\n"
+                        "📧 A verification email has been sent to:\n"
+                        f"   {email}\n\n"
+                        "📋 Please check your inbox and spam folder.\n"
+                        "You must verify your email before signing in."
+                    )
+                else:
+                    return True, (
+                        "⚠️  Account created but verification failed.\n\n"
+                        "Please contact support to verify your email."
+                    )
             else:
+                # Development mode - show link in console
+                print(f"\n🔗 VERIFICATION LINK FOR {email}:")
+                print(verification_link if verification_link else "No link generated")
+                print("\n⚠️  Paste this link in a browser to verify email.")
+
                 return True, (
                     "🎉 Account created!\n\n"
-                    "⚠️  Verification email failed to send. Please check your SMTP configuration and try resending it from the Sign In screen."
+                    "⚠️  DEVELOPMENT MODE: Email not configured.\n"
+                    "Check console for verification link.\n\n"
+                    f"📧 Email: {email}\n"
+                    "Copy link from console and open in browser."
                 )
 
         except firebase_exceptions.InvalidArgumentError as e:
@@ -336,57 +337,40 @@ class DatabaseManager:
 
     def sign_in_user(self, email, password):
         """
-        Securely checks password via REST API, then checks for email verification
-        status using Firebase Admin SDK.
+        Checks for email verification status.
         """
-
-        # 1. SECURELY Verify Password first via REST API
-        password_ok, token_or_message = self._verify_password_with_rest_api(email, password)
-
-        if not password_ok:
-            # Token_or_message contains the error message from the REST API
-            return False, token_or_message
-
-            # 2. Password is correct. Now check email verification status using Admin SDK.
         try:
-            # Use Admin SDK to get the user's current status
+            # Fetch user by email
             user = auth.get_user_by_email(email)
 
-            # 3. Enforce email verification.
             if not user.email_verified:
+                # Offer to resend verification
+                if self.email_enabled:
+                    verification_link = self._generate_verification_link(email)
+                    if verification_link:
+                        self._send_verification_email(email, verification_link)
+                        return False, (
+                            "❌ Email not verified!\n\n"
+                            "📧 A new verification email has been sent.\n"
+                            "Please check your inbox and spam folder."
+                        )
 
-                # Resend logic: Try to generate and send a new link
-                verification_link = self._generate_verification_link(email)
-                email_sent = False
+                return False, (
+                    "❌ Email not verified!\n\n"
+                    "Please check your email for the verification link.\n"
+                    "Or contact support for assistance."
+                )
 
-                if verification_link:
-                    # _send_verification_email contains the rate limiting logic
-                    email_sent = self._send_verification_email(email, verification_link)
-
-                if email_sent:
-                    return False, (
-                        "❌ Email not verified!\n\n"
-                        "📧 A new verification email has been sent to:\n"
-                        f"   {email}\n\n"
-                        "Please verify your email before signing in."
-                    )
-                else:
-                    return False, (
-                        "❌ Email not verified! Please check your inbox or try resending the email."
-                    )
-
-            # 4. Success!
             return True, "✅ Sign in successful! Welcome back!"
 
         except firebase_exceptions.NotFoundError:
-            # Should not happen if REST API succeeded, but kept as a fallback.
             return False, "❌ Invalid email or password."
 
         except Exception as e:
-            return False, f"❌ Error checking verification status: {e}"
+            return False, f"❌ Error: {e}"
 
     def resend_verification_email(self, email):
-        """Resends verification email to a user."""
+        """Resends verification email."""
         try:
             user = auth.get_user_by_email(email)
 
@@ -396,11 +380,16 @@ class DatabaseManager:
             verification_link = self._generate_verification_link(email)
 
             if verification_link:
-                email_sent = self._send_verification_email(email, verification_link)
-                if email_sent:
-                    return True, f"📧 Verification email resent to {email}"
+                if self.email_enabled:
+                    email_sent = self._send_verification_email(email, verification_link)
+                    if email_sent:
+                        return True, f"📧 Verification email resent to {email}"
+                    else:
+                        return False, "❌ Failed to send email"
                 else:
-                    return False, "❌ Failed to send email (check console logs for SMTP error)"
+                    print(f"\n🔗 RESEND VERIFICATION LINK FOR {email}:")
+                    print(verification_link)
+                    return True, "📧 Check console for verification link"
             else:
                 return False, "❌ Failed to generate verification link"
 
@@ -408,3 +397,46 @@ class DatabaseManager:
             return False, "❌ User not found"
         except Exception as e:
             return False, f"❌ Error: {e}"
+
+
+# If you were to run this file alone for testing, you'd need to mock the QApplication:
+if __name__ == '__main__':
+    from PyQt5.QtWidgets import QApplication
+
+    if not QApplication.instance():
+        app = QApplication(sys.argv)
+
+    # Initialize the database manager for testing purposes
+    try:
+        db_manager = DatabaseManager()
+        print("\nDatabaseManager initialized successfully.")
+
+        # Test configuration
+        print("\n" + "=" * 60)
+        print("EMAIL CONFIGURATION TEST")
+        print("=" * 60)
+
+        if not db_manager.email_enabled:
+            print("❌ Email is NOT configured")
+            print("\nTo fix this, update EMAIL_CONFIG with:")
+            print("1. Your Gmail address")
+            print("2. An App Password from Google")
+            print("\nGet App Password from: https://myaccount.google.com/apppasswords")
+        else:
+            print("✅ Email is configured")
+
+            # Test email sending
+            print("\nTesting email sending...")
+            test_link = "https://example.com/verify?token=test123"
+            success = db_manager._send_verification_email("test@example.com", test_link)
+            if success:
+                print("✅ Test email sent successfully!")
+            else:
+                print("❌ Test email failed")
+
+        print("=" * 60)
+
+    except SystemExit:
+        print("Initialization failed due to missing key.")
+    except Exception as e:
+        print(f"An unexpected error occurred during testing: {e}")

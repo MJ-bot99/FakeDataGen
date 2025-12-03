@@ -1,6 +1,6 @@
 ﻿{
   "hosting": {
-    "public": "public",
+    "public": "yes",
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -8,8 +8,8 @@
     ],
     "rewrites": [
       {
-        "source": "/__/auth/action",
-        "destination": "/verify.html"
+        "source": "**",
+        "destination": "/index.html"
       }
     ]
   }
