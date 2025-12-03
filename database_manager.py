@@ -22,7 +22,7 @@ class DatabaseManager:
     """
 
     # ⚠️ Replace with your Firebase service account key
-    FIREBASE_KEY_PATH = 'fakedatagen-firebase-adminsdk-fbsvc-9d978c755a.json'
+    #FIREBASE_KEY_PATH = 'fakedatagen-firebase-adminsdk-fbsvc-d90cad701d.json'
 
     # ⚠️ EMAIL CONFIGURATION - YOU MUST SET THESE
     EMAIL_CONFIG = {
